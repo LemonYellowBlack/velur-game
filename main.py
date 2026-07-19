@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from dataclasses import dataclass
 import anthropic
 from anthropic.types import MessageParam
 
@@ -13,64 +14,84 @@ class GameTurn(BaseModel):
     choices: list[str]
 
 
+@dataclass
+class Game:
+    client: anthropic.Anthropic
+    messages: list[MessageParam]
+    turn: GameTurn | None = None
+    error: str | None = None
+    state: str = "playing"
+
+
 def main() -> None:
 
     load_dotenv()
 
-    client = anthropic.Anthropic()
-    messages: list[MessageParam] = [
-        {
-            "role": "user",
-            "content": "Begin a new adventure with a castle scene.",
-        },
-    ]
+    g = Game(
+        client=anthropic.Anthropic(),
+        messages=[
+            {
+                "role": "user",
+                "content": "Begin a new advendture with a castle scene.",
+            },
+        ],
+    )
 
-    while True:
-        response = client.messages.parse(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=messages,
-            output_format=GameTurn,
-        )
+    while g.state == "playing":
+        g = handle_player_turn(g)
+        if g.error is not None:
+            raise RuntimeError(g.error)
 
-        turn = response.parsed_output
 
-        if turn is None:
-            raise RuntimeError("turn not returned")
+def handle_player_turn(g: Game) -> Game:
+    response = g.client.messages.parse(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        system=SYSTEM_PROMPT,
+        messages=g.messages,
+        output_format=GameTurn,
+    )
 
-        print("""
-        --------------------
-            GM TURN
-        --------------------
-            """)
-        print(f"\n{turn.narrative}\n")
+    turn = response.parsed_output
 
-        for i, choice in enumerate(turn.choices):
-            print(f"\n[#{i + 1}] {choice}")
+    if turn is None:
+        g.error = "turn not returned"
+        return g
 
-        print("""
-        ---------------------
-            PLAYER TURN
-        ---------------------
-             """)
+    print("""
+    --------------------
+        GM TURN
+    --------------------
+        """)
+    print(f"\n{turn.narrative}\n")
 
-        raw = input("\n number or q to quit: ")
-        if raw == "q":
-            break
+    for i, choice in enumerate(turn.choices):
+        print(f"\n[#{i + 1}] {choice}")
 
-        if not raw.isdigit():
-            print("please enter a number")
-            continue
+    print("""
+    ---------------------
+        PLAYER TURN
+    ---------------------
+        """)
 
-        index = int(raw) - 1
-        if index < 0 or index >= len(turn.choices):
-            print("that's not one of the choices")
-            continue
-        choice = turn.choices[index]
+    raw = input("\n number or q to quit: ")
+    if raw == "q":
+        g.state = "quit"
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": f"I choose: {choice}"})
+    if not raw.isdigit():
+        print("please enter a number")
+        return g
+
+    index = int(raw) - 1
+    if index < 0 or index >= len(turn.choices):
+        print("that's not one of the choices")
+        return g
+    choice = turn.choices[index]
+
+    g.messages.append({"role": "assistant", "content": response.content})
+    g.messages.append({"role": "user", "content": f"I choose: {choice}"})
+
+    return g
 
 
 if __name__ == "__main__":
