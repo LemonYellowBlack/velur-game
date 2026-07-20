@@ -6,6 +6,7 @@ from anthropic.types import MessageParam
 from enum import StrEnum
 import json
 from pathlib import Path
+from textwrap import dedent
 
 MODEL = "claude-haiku-4-5"
 SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
@@ -38,10 +39,10 @@ class GameState(StrEnum):
 
 def main() -> None:
 
-    load_dotenv()
+    _ = load_dotenv()
     g: Game = init_game()
 
-    while g.state is not GameState.ERROR or g.state is not GameState.QUIT:
+    while g.state is not GameState.ERROR and g.state is not GameState.QUIT:
         while g.state is GameState.PLAYING:
             handle_player_turn(g)
         while g.state is GameState.MENU:
@@ -59,12 +60,14 @@ def init_game() -> Game:
 
 
 def handle_menu(g: Game) -> None:
-    opt = input("""
-[#1] play
-[#2] save
-[#3] load
-[#4] quit
-          """)
+    opt = input(
+        dedent("""
+        [#1] play
+        [#2] save
+        [#3] load
+        [#4] quit
+    """)
+    )
 
     match int(opt):
         case 1:
@@ -77,6 +80,8 @@ def handle_menu(g: Game) -> None:
             load_game(g)
         case 4:
             g.state = GameState.QUIT
+        case _:
+            pass
 
 
 def handle_player_turn(g: Game) -> None:
@@ -94,21 +99,25 @@ def handle_player_turn(g: Game) -> None:
         g.error = "turn not returned"
         return
 
-    print("""
---------------------
-    GM TURN
---------------------
-        """)
+    print(
+        dedent("""
+        --------------------
+            GM TURN
+        --------------------
+    """)
+    )
     print(f"\n{g.turn.narrative}\n")
 
     for i, choice in enumerate(g.turn.choices):
         print(f"\n[#{i + 1}] {choice}")
 
-    print("""
----------------------
-    PLAYER TURN
----------------------
-        """)
+    print(
+        dedent("""
+        ---------------------
+            PLAYER TURN
+        ---------------------
+    """)
+    )
 
     raw = input("\n number or m for menu: ")
     if raw == "m":
@@ -156,6 +165,26 @@ def save_game(g: Game) -> None:
 
 
 def load_game(g: Game) -> None:
+    if not SAVES_DIR.exists():
+        print("nothing to load")
+        return
+
+    save_files = list(SAVES_DIR.glob("*.json"))
+    for i, sfile in enumerate(save_files):
+        print(f"\n[#{i + 1}] {sfile}")
+
+    raw = input("\nselect file: ")
+    index = int(raw) - 1
+
+    print(f"loading {save_files[index]}")
+
+    with save_files[index].open("r") as f:
+        d = json.load(f)
+        g.messages = d["messages"]
+
+    print("game loaded")
+    g.state = GameState.PLAYING
+
     return
 
 
