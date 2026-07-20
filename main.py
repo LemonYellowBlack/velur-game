@@ -3,10 +3,11 @@ from pydantic import BaseModel
 from dataclasses import dataclass
 import anthropic
 from anthropic.types import MessageParam
-from enum import StrEnum
+from enum import Enum
 import json
 from pathlib import Path
 from textwrap import dedent
+from datetime import datetime
 
 MODEL = "claude-haiku-4-5"
 SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
@@ -18,7 +19,7 @@ SAVES_DIR = Path(__file__).parent / "saves"
 @dataclass
 class Game:
     client: anthropic.Anthropic
-    state: GameState
+    state: AppState
     messages: list[MessageParam]
     turn: GameTurn | None = None
     error: str | None = None
@@ -30,7 +31,7 @@ class GameTurn(BaseModel):
     choices: list[str]
 
 
-class GameState(StrEnum):
+class AppState(Enum):
     PLAYING = "playing"
     QUIT = "quit"
     ERROR = "error"
@@ -42,30 +43,37 @@ def main() -> None:
     _ = load_dotenv()
     g: Game = init_game()
 
-    while g.state is not GameState.ERROR and g.state is not GameState.QUIT:
-        while g.state is GameState.PLAYING:
-            handle_player_turn(g)
-        while g.state is GameState.MENU:
-            handle_menu(g)
+    while g.state is not AppState.ERROR and g.state is not AppState.QUIT:
+        match g.state:
+            case AppState.PLAYING:
+                handle_player_turn(g)
+            case AppState.MENU:
+                handle_menu(g)
 
-    if g.state is GameState.ERROR:
+    if g.state is AppState.ERROR:
         handle_game_error(g)
 
-    if g.state is GameState.QUIT:
+    if g.state is AppState.QUIT:
         handle_quit()
 
 
 def init_game() -> Game:
-    return Game(client=anthropic.Anthropic(), state=GameState.MENU, messages=[])
+    return Game(client=anthropic.Anthropic(), state=AppState.MENU, messages=[])
 
 
 def handle_menu(g: Game) -> None:
+    file_name = ""
+    if g.save_file is not None:
+        file_name = g.save_file.name
+
     opt = input(
-        dedent("""
-        [#1] play
+        dedent(f"""
+        MAIN MENU
+        -----------------
+        [#1] play {file_name}
         [#2] save
         [#3] load
-        [#4] quit
+        [#4] quit\n
     """)
     )
 
@@ -73,13 +81,13 @@ def handle_menu(g: Game) -> None:
         case 1:
             if len(g.messages) == 0:
                 g.messages.append({"role": "user", "content": f"{FIRST_TURN}"})
-            g.state = GameState.PLAYING
+            g.state = AppState.PLAYING
         case 2:
             save_game(g)
         case 3:
             load_game(g)
         case 4:
-            g.state = GameState.QUIT
+            g.state = AppState.QUIT
         case _:
             pass
 
@@ -103,25 +111,25 @@ def handle_player_turn(g: Game) -> None:
         dedent("""
         --------------------
             GM TURN
-        --------------------
+        --------------------\n
     """)
     )
-    print(f"\n{g.turn.narrative}\n")
+    print(f"{g.turn.narrative}\n")
 
     for i, choice in enumerate(g.turn.choices):
-        print(f"\n[#{i + 1}] {choice}")
+        print(f"[#{i + 1}] {choice}\n")
 
     print(
         dedent("""
         ---------------------
             PLAYER TURN
-        ---------------------
+        ---------------------\n
     """)
     )
 
-    raw = input("\n number or m for menu: ")
+    raw = input("number or m for menu: ")
     if raw == "m":
-        g.state = GameState.MENU
+        g.state = AppState.MENU
 
     if not raw.isdigit():
         print("please enter a number")
@@ -149,12 +157,38 @@ def handle_quit() -> None:
 
 
 def save_game(g: Game) -> None:
-    print("saving progress...")
-
-    if g.save_file is None:
-        g.save_file = SAVES_DIR / "save.json"
-
     SAVES_DIR.mkdir(parents=True, exist_ok=True)
+
+    saves = [p.name for p in SAVES_DIR.glob("*.json")]
+    saves.insert(0, "new save")
+
+    for i, s in enumerate(saves):
+        print(f"\n[#{i + 1}] {s}")
+
+    index = None
+    while index is None:
+        raw = input("\nselect file: ")
+
+        if not raw.isdigit():
+            print("must be a number")
+            continue
+
+        _index = int(raw) - 1
+
+        if _index < 0 or _index >= len(saves):
+            print("must be an option")
+            continue
+
+        index = _index
+
+    file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    if index == 0:
+        file_name = input("file name: ")
+    else:
+        file_name = saves[index]
+
+    print(f"saving to {file_name}...")
+    g.save_file = SAVES_DIR / f"{file_name}"
 
     d = {"messages": g.messages}
     with g.save_file.open("w") as f:
@@ -166,24 +200,41 @@ def save_game(g: Game) -> None:
 
 def load_game(g: Game) -> None:
     if not SAVES_DIR.exists():
-        print("nothing to load")
+        print("no saves directory")
         return
 
-    save_files = list(SAVES_DIR.glob("*.json"))
-    for i, sfile in enumerate(save_files):
+    saves = list(SAVES_DIR.glob("*.json"))
+    if len(saves) == 0:
+        print("no saves files")
+
+    for i, sfile in enumerate(saves):
         print(f"\n[#{i + 1}] {sfile}")
 
-    raw = input("\nselect file: ")
-    index = int(raw) - 1
+    index = None
+    while index is None:
+        raw = input("\nselect file: ")
 
-    print(f"loading {save_files[index]}")
+        if not raw.isdigit():
+            print("must be a number")
+            continue
 
-    with save_files[index].open("r") as f:
+        _index = int(raw) - 1
+
+        if _index < 0 or _index >= len(saves):
+            print("must be an option")
+            continue
+
+        index = _index
+
+    game_file = saves[index]
+    print(f"loading {game_file}")
+
+    with game_file.open("r") as f:
         d = json.load(f)
         g.messages = d["messages"]
 
-    print("game loaded")
-    g.state = GameState.PLAYING
+    g.save_file = game_file
+    print(f"{g.save_file} loaded")
 
     return
 
