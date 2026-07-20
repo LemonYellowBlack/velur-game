@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Begin a new adventure with a castle scene."
+    },
+    {
+      "role": "assistant",
+      "content": "{\"narrative\":\"You stand before the massive iron gates of Blackthorn Castle, a fortress of dark stone and twisted spires that claws at the gray sky. The wind carries the scent of smoke and something far more sinister. The gates hang open, creaking on their hinges, and an eerie silence emanates from within. Scattered crows circle overhead, their cries echoing off the stone walls. Behind you, the moorland stretches into mist. Before you, the castle courtyard beckons with shadow and mystery. Your horse shifts nervously beneath you.\",\"choices\":[\"Dismount and enter the castle cautiously on foot\",\"Call out to see if anyone answers from within the walls\",\"Circle around to find another entrance\",\"Turn back and investigate the moorland first\",\"Approach the gates slowly, watching for movement\"]}"
+    },
+    {
+      "role": "user",
+      "content": "I choose: Call out to see if anyone answers from within the walls"
+    }
+  ]
+}

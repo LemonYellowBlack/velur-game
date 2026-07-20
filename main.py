@@ -3,10 +3,25 @@ from pydantic import BaseModel
 from dataclasses import dataclass
 import anthropic
 from anthropic.types import MessageParam
+from enum import StrEnum
+import json
+from pathlib import Path
 
 MODEL = "claude-haiku-4-5"
 SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
+FIRST_TURN = "Begin a new adventure with a castle scene."
 MAX_TOKENS = 1024
+SAVES_DIR = Path(__file__).parent / "saves"
+
+
+@dataclass
+class Game:
+    client: anthropic.Anthropic
+    state: GameState
+    messages: list[MessageParam]
+    turn: GameTurn | None = None
+    error: str | None = None
+    save_file: Path | None = None
 
 
 class GameTurn(BaseModel):
@@ -14,36 +29,57 @@ class GameTurn(BaseModel):
     choices: list[str]
 
 
-@dataclass
-class Game:
-    client: anthropic.Anthropic
-    messages: list[MessageParam]
-    turn: GameTurn | None = None
-    error: str | None = None
-    state: str = "playing"
+class GameState(StrEnum):
+    PLAYING = "playing"
+    QUIT = "quit"
+    ERROR = "error"
+    MENU = "menu"
 
 
 def main() -> None:
 
     load_dotenv()
+    g: Game = init_game()
 
-    g = Game(
-        client=anthropic.Anthropic(),
-        messages=[
-            {
-                "role": "user",
-                "content": "Begin a new advendture with a castle scene.",
-            },
-        ],
-    )
+    while g.state is not GameState.ERROR or g.state is not GameState.QUIT:
+        while g.state is GameState.PLAYING:
+            handle_player_turn(g)
+        while g.state is GameState.MENU:
+            handle_menu(g)
 
-    while g.state == "playing":
-        g = handle_player_turn(g)
-        if g.error is not None:
-            raise RuntimeError(g.error)
+    if g.state is GameState.ERROR:
+        handle_game_error(g)
+
+    if g.state is GameState.QUIT:
+        handle_quit()
 
 
-def handle_player_turn(g: Game) -> Game:
+def init_game() -> Game:
+    return Game(client=anthropic.Anthropic(), state=GameState.MENU, messages=[])
+
+
+def handle_menu(g: Game) -> None:
+    opt = input("""
+[#1] play
+[#2] save
+[#3] load
+[#4] quit
+          """)
+
+    match int(opt):
+        case 1:
+            if len(g.messages) == 0:
+                g.messages.append({"role": "user", "content": f"{FIRST_TURN}"})
+            g.state = GameState.PLAYING
+        case 2:
+            save_game(g)
+        case 3:
+            load_game(g)
+        case 4:
+            g.state = GameState.QUIT
+
+
+def handle_player_turn(g: Game) -> None:
     response = g.client.messages.parse(
         model=MODEL,
         max_tokens=MAX_TOKENS,
@@ -52,46 +88,75 @@ def handle_player_turn(g: Game) -> Game:
         output_format=GameTurn,
     )
 
-    turn = response.parsed_output
+    g.turn = response.parsed_output
 
-    if turn is None:
+    if g.turn is None:
         g.error = "turn not returned"
-        return g
+        return
 
     print("""
-    --------------------
-        GM TURN
-    --------------------
+--------------------
+    GM TURN
+--------------------
         """)
-    print(f"\n{turn.narrative}\n")
+    print(f"\n{g.turn.narrative}\n")
 
-    for i, choice in enumerate(turn.choices):
+    for i, choice in enumerate(g.turn.choices):
         print(f"\n[#{i + 1}] {choice}")
 
     print("""
-    ---------------------
-        PLAYER TURN
-    ---------------------
+---------------------
+    PLAYER TURN
+---------------------
         """)
 
-    raw = input("\n number or q to quit: ")
-    if raw == "q":
-        g.state = "quit"
+    raw = input("\n number or m for menu: ")
+    if raw == "m":
+        g.state = GameState.MENU
 
     if not raw.isdigit():
         print("please enter a number")
-        return g
+        return
 
     index = int(raw) - 1
-    if index < 0 or index >= len(turn.choices):
+    if index < 0 or index >= len(g.turn.choices):
         print("that's not one of the choices")
-        return g
-    choice = turn.choices[index]
+        return
+    choice = g.turn.choices[index]
 
-    g.messages.append({"role": "assistant", "content": response.content})
+    g.messages.append({"role": "assistant", "content": g.turn.model_dump_json()})
     g.messages.append({"role": "user", "content": f"I choose: {choice}"})
 
-    return g
+    return
+
+
+def handle_game_error(g: Game) -> None:
+    raise RuntimeError(g.error)
+
+
+def handle_quit() -> None:
+    print("goodbye.")
+    return
+
+
+def save_game(g: Game) -> None:
+    print("saving progress...")
+
+    if g.save_file is None:
+        g.save_file = SAVES_DIR / "save.json"
+
+    SAVES_DIR.mkdir(parents=True, exist_ok=True)
+
+    d = {"messages": g.messages}
+    with g.save_file.open("w") as f:
+        json.dump(d, f, indent=2)
+
+    print("progress saved.")
+    return
+
+
+def load_game(g: Game) -> None:
+    return
 
 
 if __name__ == "__main__":
