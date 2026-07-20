@@ -14,3 +14,15 @@
 - aws: EC2, S3 (maybe R2), aurora, bedrock
 - cloudflare: DNS
 
+## Context Management
+- smaller model handles turn-by-turn from a Game Context block
+- larger model(s) work in the background asyncronously to adjust Game Context 
+- Game Context is influenced by:
+    - World State (corpus wiki, facts about the world)
+    - Character State (how the player character, and revelvant NPCs have been affected)
+    - Story State (plot points, tension, pacing, arcs)
+
+## TODO
+- design small-model Game Context shape
+- how do individual turns update that state?
+- how are stats managed by the app and the model?
