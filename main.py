@@ -100,18 +100,25 @@ def handle_menu(g: Game) -> None:
     if g.save_file is not None:
         file_name = g.save_file.name
 
-    opt = input(
-        dedent(f"""
-        MAIN MENU
-        -----------------
-        [#1] play {file_name}
-        [#2] save
-        [#3] load
-        [#4] quit\n
-    """)
-    )
+    option = None
+    while option is None:
+        opt = input(
+            dedent(f"""
+            MAIN MENU
+            -----------------
+            [#1] play {file_name}
+            [#2] save
+            [#3] load
+            [#4] quit\n
+        """)
+        )
 
-    match int(opt):
+        if opt.isdigit():
+            option = int(opt)
+        else:
+            print("must be a number")
+
+    match option:
         case 1:
             if len(g.messages) == 0:
                 g.messages.append({"role": "user", "content": FIRST_TURN})
@@ -191,6 +198,7 @@ def handle_player_turn(g: Game) -> None:
     raw = input("number or m for menu: ")
     if raw == "m":
         g.app_state = AppState.MENU
+        return
 
     if not raw.isdigit():
         print("please enter a number")
@@ -224,7 +232,7 @@ def save_game(g: Game) -> None:
     saves.insert(0, "new save")
 
     for i, s in enumerate(saves):
-        print(f"\n[#{i + 1}] {s}")
+        print(f"\n[#{i + 1}] {Path(s).stem}")
 
     index = None
     while index is None:
@@ -245,6 +253,8 @@ def save_game(g: Game) -> None:
     file_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
     if index == 0:
         file_name = input("file name: ")
+        if not file_name.endswith(".json"):
+            file_name += ".json"
     else:
         file_name = saves[index]
 
@@ -274,7 +284,7 @@ def load_game(g: Game) -> None:
         return
 
     for i, sfile in enumerate(saves):
-        print(f"\n[#{i + 1}] {sfile}")
+        print(f"\n[#{i + 1}] {sfile.stem}")
 
     index = None
     while index is None:
@@ -293,7 +303,7 @@ def load_game(g: Game) -> None:
         index = _index
 
     game_file = saves[index]
-    print(f"loading {game_file}")
+    print(f"loading {game_file.stem}")
 
     with game_file.open("r") as f:
         d = json.load(f)
@@ -302,7 +312,7 @@ def load_game(g: Game) -> None:
         g.player = TypeAdapter(Player).validate_python(d["player"])
 
     g.save_file = game_file
-    print(f"{g.save_file} loaded")
+    print(f"{g.save_file.stem} loaded")
 
     return
 
