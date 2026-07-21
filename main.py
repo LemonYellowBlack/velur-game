@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 from pydantic import BaseModel, TypeAdapter
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import anthropic
 from anthropic.types import MessageParam
 from enum import Enum, StrEnum
@@ -24,9 +24,11 @@ class AppState(Enum):
 
 
 class Amount(StrEnum):
+    NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    MAX = "max"
 
 
 class Speed(StrEnum):
@@ -35,29 +37,47 @@ class Speed(StrEnum):
     FAST = "fast"
 
 
-class GameTurn(BaseModel):
-    narrative: str
-    choices: list[str]
+class Effect(StrEnum):
+    NONE = "none"
+    MINOR = "minor"
+    MODERATE = "moderate"
+    SEVERE = "severe"
 
 
-@dataclass
-class Player:
-    health: int
-    stamina: int
+class PlayerState(BaseModel):
+    exhaustion: Amount = Amount.NONE
 
 
 class StoryState(BaseModel):
-    tension: Amount
-    pace: Speed
+    tension: Amount = Amount.LOW
+    pace: Speed = Speed.SLOW
+
+
+class PlayerEffects(BaseModel):
+    health: Effect = Effect.NONE
+    stamina: Effect = Effect.NONE
+
+
+class GameTurn(BaseModel):
+    narrative: str
+    choices: list[str]
+    player_effects: PlayerEffects
+
+
+@dataclass
+class PlayerStats:
+    health: int = 100
+    stamina: int = 100
 
 
 @dataclass
 class Game:
     client: anthropic.Anthropic
-    app_state: AppState
-    player: Player
-    story_state_log: list[StoryState]
-    messages: list[MessageParam]
+    app_state: AppState = AppState.MENU
+    player_stats: PlayerStats = field(default_factory=PlayerStats)
+    player_state: PlayerState = field(default_factory=PlayerState)
+    story_state_log: list[StoryState] = field(default_factory=lambda: [StoryState()])
+    messages: list[MessageParam] = field(default_factory=list)
     turn: GameTurn | None = None
     error: str | None = None
     save_file: Path | None = None
@@ -66,7 +86,7 @@ class Game:
 def main() -> None:
 
     _ = load_dotenv()
-    g: Game = init_game()
+    g = Game(client=anthropic.Anthropic())
 
     while g.app_state is not AppState.ERROR and g.app_state is not AppState.QUIT:
         match g.app_state:
@@ -80,19 +100,6 @@ def main() -> None:
 
     if g.app_state is AppState.QUIT:
         handle_quit()
-
-
-def init_game() -> Game:
-    player = Player(health=100, stamina=100)
-    story_state = StoryState(tension=Amount.LOW, pace=Speed.SLOW)
-    log = [story_state]
-    return Game(
-        client=anthropic.Anthropic(),
-        app_state=AppState.MENU,
-        player=player,
-        story_state_log=log,
-        messages=[],
-    )
 
 
 def handle_menu(g: Game) -> None:
@@ -138,6 +145,7 @@ def get_turn_header(g: Game) -> str:
                     NARRATIVE DIRECTION:
                     tension: {g.story_state_log[-1].tension}
                     pace: {g.story_state_log[-1].pace}
+                    player exhaustion: {g.player_state.exhaustion}
                     ------------------------------------
                   """)
 
@@ -174,6 +182,8 @@ def handle_player_turn(g: Game) -> None:
     if g.turn is None:
         g.error = "turn not returned"
         return
+
+    handle_player_effects(g, g.player_stats, g.player_state, g.turn.player_effects)
 
     print(
         dedent("""
@@ -214,6 +224,50 @@ def handle_player_turn(g: Game) -> None:
     g.messages.append({"role": "user", "content": f"I choose: {choice}"})
 
     return
+
+
+def handle_player_effects(
+    g: Game, stats: PlayerStats, state: PlayerState, effects: PlayerEffects
+) -> None:
+    match effects.health:
+        case Effect.SEVERE:
+            stats.health -= 20
+        case Effect.MODERATE:
+            stats.health -= 10
+        case Effect.MINOR:
+            stats.health -= 5
+        case _:
+            pass
+
+    if stats.health <= 0:
+        handle_player_death(g)
+
+    match effects.stamina:
+        case Effect.SEVERE:
+            stats.stamina -= 20
+        case Effect.MODERATE:
+            stats.stamina -= 10
+        case Effect.MINOR:
+            stats.stamina -= 5
+        case _:
+            pass
+
+    if stats.stamina <= 0:
+        stats.stamina = 0
+        state.exhaustion = Amount.MAX
+    elif stats.stamina <= 25:
+        state.exhaustion = Amount.HIGH
+    elif stats.stamina <= 50:
+        state.exhaustion = Amount.MEDIUM
+    elif stats.stamina <= 75:
+        state.exhaustion = Amount.LOW
+    else:
+        state.exhaustion = Amount.NONE
+
+
+def handle_player_death(g: Game) -> None:
+    print("YOU DIED")
+    g.app_state = AppState.QUIT
 
 
 def handle_game_error(g: Game) -> None:
@@ -264,7 +318,8 @@ def save_game(g: Game) -> None:
     d = {
         "messages": g.messages,
         "story_state_log": [s.model_dump(mode="json") for s in g.story_state_log],
-        "player": asdict(g.player),
+        "player_state": g.player_state.model_dump(mode="json"),
+        "player_stats": asdict(g.player_stats),
     }
     with g.save_file.open("w") as f:
         json.dump(d, f, indent=2)
@@ -309,7 +364,8 @@ def load_game(g: Game) -> None:
         d = json.load(f)
         g.messages = d["messages"]
         g.story_state_log = [StoryState.model_validate(x) for x in d["story_state_log"]]
-        g.player = TypeAdapter(Player).validate_python(d["player"])
+        g.player_state = PlayerState.model_validate(d["player_state"])
+        g.player_stats = TypeAdapter(PlayerStats).validate_python(d["player_stats"])
 
     g.save_file = game_file
     print(f"{g.save_file.stem} loaded")
