@@ -1,9 +1,9 @@
 from dotenv import load_dotenv
-from pydantic import BaseModel
-from dataclasses import dataclass
+from pydantic import BaseModel, TypeAdapter
+from dataclasses import dataclass, asdict
 import anthropic
 from anthropic.types import MessageParam
-from enum import Enum
+from enum import Enum, StrEnum
 import json
 from pathlib import Path
 from textwrap import dedent
@@ -16,21 +16,6 @@ MAX_TOKENS = 1024
 SAVES_DIR = Path(__file__).parent / "saves"
 
 
-@dataclass
-class Game:
-    client: anthropic.Anthropic
-    state: AppState
-    messages: list[MessageParam]
-    turn: GameTurn | None = None
-    error: str | None = None
-    save_file: Path | None = None
-
-
-class GameTurn(BaseModel):
-    narrative: str
-    choices: list[str]
-
-
 class AppState(Enum):
     PLAYING = "playing"
     QUIT = "quit"
@@ -38,27 +23,76 @@ class AppState(Enum):
     MENU = "menu"
 
 
+class Amount(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class Speed(StrEnum):
+    SLOW = "slow"
+    MEDIUM = "medium"
+    FAST = "fast"
+
+
+class GameTurn(BaseModel):
+    narrative: str
+    choices: list[str]
+
+
+@dataclass
+class Player:
+    health: int
+    stamina: int
+
+
+class StoryState(BaseModel):
+    tension: Amount
+    pace: Speed
+
+
+@dataclass
+class Game:
+    client: anthropic.Anthropic
+    app_state: AppState
+    player: Player
+    story_state_log: list[StoryState]
+    messages: list[MessageParam]
+    turn: GameTurn | None = None
+    error: str | None = None
+    save_file: Path | None = None
+
+
 def main() -> None:
 
     _ = load_dotenv()
     g: Game = init_game()
 
-    while g.state is not AppState.ERROR and g.state is not AppState.QUIT:
-        match g.state:
+    while g.app_state is not AppState.ERROR and g.app_state is not AppState.QUIT:
+        match g.app_state:
             case AppState.PLAYING:
                 handle_player_turn(g)
             case AppState.MENU:
                 handle_menu(g)
 
-    if g.state is AppState.ERROR:
+    if g.app_state is AppState.ERROR:
         handle_game_error(g)
 
-    if g.state is AppState.QUIT:
+    if g.app_state is AppState.QUIT:
         handle_quit()
 
 
 def init_game() -> Game:
-    return Game(client=anthropic.Anthropic(), state=AppState.MENU, messages=[])
+    player = Player(health=100, stamina=100)
+    story_state = StoryState(tension=Amount.LOW, pace=Speed.SLOW)
+    log = [story_state]
+    return Game(
+        client=anthropic.Anthropic(),
+        app_state=AppState.MENU,
+        player=player,
+        story_state_log=log,
+        messages=[],
+    )
 
 
 def handle_menu(g: Game) -> None:
@@ -80,16 +114,43 @@ def handle_menu(g: Game) -> None:
     match int(opt):
         case 1:
             if len(g.messages) == 0:
-                g.messages.append({"role": "user", "content": f"{FIRST_TURN}"})
-            g.state = AppState.PLAYING
+                g.messages.append({"role": "user", "content": FIRST_TURN})
+            g.app_state = AppState.PLAYING
         case 2:
             save_game(g)
         case 3:
             load_game(g)
         case 4:
-            g.state = AppState.QUIT
+            g.app_state = AppState.QUIT
         case _:
             pass
+
+
+def get_turn_header(g: Game) -> str:
+    return dedent(f"""
+                    NARRATIVE DIRECTION:
+                    tension: {g.story_state_log[-1].tension}
+                    pace: {g.story_state_log[-1].pace}
+                    ------------------------------------
+                  """)
+
+
+def build_turn_message(g: Game) -> list[MessageParam]:
+    messages = list(g.messages)
+    if messages and messages[-1]["role"] == "user":
+        content = messages[-1]["content"]
+        if not isinstance(content, str):
+            return messages
+
+        messages[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": get_turn_header(g)},
+                {"type": "text", "text": content},
+            ],
+        }
+
+    return messages
 
 
 def handle_player_turn(g: Game) -> None:
@@ -97,7 +158,7 @@ def handle_player_turn(g: Game) -> None:
         model=MODEL,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=g.messages,
+        messages=build_turn_message(g),
         output_format=GameTurn,
     )
 
@@ -109,10 +170,10 @@ def handle_player_turn(g: Game) -> None:
 
     print(
         dedent("""
-        --------------------
-            GM TURN
-        --------------------\n
-    """)
+            --------------------
+                GM TURN
+            --------------------\n
+        """)
     )
     print(f"{g.turn.narrative}\n")
 
@@ -121,15 +182,15 @@ def handle_player_turn(g: Game) -> None:
 
     print(
         dedent("""
-        ---------------------
-            PLAYER TURN
-        ---------------------\n
-    """)
+            ---------------------
+                PLAYER TURN
+            ---------------------\n
+        """)
     )
 
     raw = input("number or m for menu: ")
     if raw == "m":
-        g.state = AppState.MENU
+        g.app_state = AppState.MENU
 
     if not raw.isdigit():
         print("please enter a number")
@@ -190,7 +251,11 @@ def save_game(g: Game) -> None:
     print(f"saving to {file_name}...")
     g.save_file = SAVES_DIR / f"{file_name}"
 
-    d = {"messages": g.messages}
+    d = {
+        "messages": g.messages,
+        "story_state_log": [s.model_dump(mode="json") for s in g.story_state_log],
+        "player": asdict(g.player),
+    }
     with g.save_file.open("w") as f:
         json.dump(d, f, indent=2)
 
@@ -206,6 +271,7 @@ def load_game(g: Game) -> None:
     saves = list(SAVES_DIR.glob("*.json"))
     if len(saves) == 0:
         print("no saves files")
+        return
 
     for i, sfile in enumerate(saves):
         print(f"\n[#{i + 1}] {sfile}")
@@ -232,6 +298,8 @@ def load_game(g: Game) -> None:
     with game_file.open("r") as f:
         d = json.load(f)
         g.messages = d["messages"]
+        g.story_state_log = [StoryState.model_validate(x) for x in d["story_state_log"]]
+        g.player = TypeAdapter(Player).validate_python(d["player"])
 
     g.save_file = game_file
     print(f"{g.save_file} loaded")
