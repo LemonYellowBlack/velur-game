@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, Field
 from dataclasses import dataclass, asdict, field
 import anthropic
 from anthropic.types import MessageParam
@@ -23,20 +23,6 @@ class AppState(Enum):
     MENU = "menu"
 
 
-class Amount(StrEnum):
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    MAX = "max"
-
-
-class Speed(StrEnum):
-    SLOW = "slow"
-    MEDIUM = "medium"
-    FAST = "fast"
-
-
 class Effect(StrEnum):
     NONE = "none"
     MINOR = "minor"
@@ -44,18 +30,69 @@ class Effect(StrEnum):
     SEVERE = "severe"
 
 
+class Tension(StrEnum):
+    CALM = "calm"
+    UNEASY = "uneasy"
+    TENSE = "tense"
+    DREAD = "dread"
+    TERROR = "terror"
+
+
+class Pace(StrEnum):
+    LULL = "lull"
+    STEADY = "steady"
+    RISING = "rising"
+    BREAKNECK = "breakneck"
+
+
+class Exhaustion(StrEnum):
+    FRESH = "fresh"
+    WINDED = "winded"
+    TIRED = "tired"
+    FLAGGING = "flagging"
+    SPENT = "spent"
+
+
+class Danger(StrEnum):
+    SAFE = "safe"
+    RISKY = "risky"
+    PERILOUS = "perilous"
+    DEADLY = "deadly"
+
+
+class Mood(StrEnum):
+    HOPEFULL = "hopefull"
+    SOMBER = "somber"
+    OMINOUS = "ominous"
+    BLEAK = "bleak"
+
+
 class PlayerState(BaseModel):
-    exhaustion: Amount = Amount.NONE
+    exhaustion: Exhaustion = Exhaustion.FRESH
 
 
 class StoryState(BaseModel):
-    tension: Amount = Amount.LOW
-    pace: Speed = Speed.SLOW
+    tension: Tension = Tension.UNEASY
+    pace: Pace = Pace.STEADY
+    danger: Danger = Danger.RISKY
+    mood: Mood = Mood.OMINOUS
 
 
 class PlayerEffects(BaseModel):
-    health: Effect = Effect.NONE
-    stamina: Effect = Effect.NONE
+    health: Effect = Field(
+        default=Effect.NONE,
+        description=(
+            "indicates how much the player's health changed this turn "
+            "based on injury or harm in the narrative"
+        ),
+    )
+    stamina: Effect = Field(
+        default=Effect.NONE,
+        description=(
+            "indicates much the player's stamina was drained this turn "
+            "based on exertion in the narrative"
+        ),
+    )
 
 
 class GameTurn(BaseModel):
@@ -145,7 +182,9 @@ def get_turn_header(g: Game) -> str:
                     NARRATIVE DIRECTION:
                     tension: {g.story_state_log[-1].tension}
                     pace: {g.story_state_log[-1].pace}
-                    player exhaustion: {g.player_state.exhaustion}
+                    danger: {g.story_state_log[-1].danger}
+                    mood: {g.story_state_log[-1].mood}
+                    player's exhaustion: {g.player_state.exhaustion}
                     ------------------------------------
                   """)
 
@@ -254,15 +293,15 @@ def handle_player_effects(
 
     if stats.stamina <= 0:
         stats.stamina = 0
-        state.exhaustion = Amount.MAX
+        state.exhaustion = Exhaustion.SPENT
     elif stats.stamina <= 25:
-        state.exhaustion = Amount.HIGH
+        state.exhaustion = Exhaustion.FLAGGING
     elif stats.stamina <= 50:
-        state.exhaustion = Amount.MEDIUM
+        state.exhaustion = Exhaustion.TIRED
     elif stats.stamina <= 75:
-        state.exhaustion = Amount.LOW
+        state.exhaustion = Exhaustion.WINDED
     else:
-        state.exhaustion = Amount.NONE
+        state.exhaustion = Exhaustion.FRESH
 
 
 def handle_player_death(g: Game) -> None:
