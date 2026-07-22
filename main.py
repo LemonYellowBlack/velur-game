@@ -11,6 +11,13 @@ from datetime import datetime
 
 NARRATOR_MODEL = "claude-haiku-4-5"
 NARRATOR_SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
+DIRECTOR_MODEL = "claude-sonnet-4-6"
+DIRECTOR_SYSTEM_PROMPT = dedent("""
+    You are the Director of a dark fantasy adventure, responsible for shaping the story's arc over time.
+    Read the story and set tension, pace, danger, and mood for the next beat.
+    A story must breathe: build tension toward peaks and release afterward. 
+    Escalate or lower stakes to keep the story moving.
+    """)
 FIRST_TURN = "Begin a new adventure with a castle scene."
 MAX_TOKENS = 1024
 SAVES_DIR = Path(__file__).parent / "saves"
@@ -248,11 +255,22 @@ def handle_menu(g: Game) -> None:
 def get_turn_header(g: Game) -> str:
     return dedent(f"""
                     NARRATIVE DIRECTION:
+                    tension: {g.story_state_log[-1].tension.cue}
+                    pace: {g.story_state_log[-1].pace.cue}
+                    danger: {g.story_state_log[-1].danger.cue}
+                    mood: {g.story_state_log[-1].mood.cue}
+                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
+                    ------------------------------------
+                  """)
+
+
+def get_director_header(g: Game) -> str:
+    return dedent(f"""
+                    PREVIOUS DIRECTION:
                     tension: {g.story_state_log[-1].tension}
                     pace: {g.story_state_log[-1].pace}
                     danger: {g.story_state_log[-1].danger}
                     mood: {g.story_state_log[-1].mood}
-                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
                     ------------------------------------
                   """)
 
@@ -275,8 +293,26 @@ def build_turn_message(g: Game) -> list[MessageParam]:
     return messages
 
 
+def build_director_message(g: Game) -> list[MessageParam]:
+    messages = list(g.messages)
+    if messages and messages[-1]["role"] == "user":
+        content = messages[-1]["content"]
+        if not isinstance(content, str):
+            return messages
+
+        messages[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": get_director_header(g)},
+                {"type": "text", "text": content},
+            ],
+        }
+
+    return messages
+
+
 def handle_player_turn(g: Game) -> None:
-    narration = g.client.messages.parse(
+    narrator = g.client.messages.parse(
         model=NARRATOR_MODEL,
         max_tokens=MAX_TOKENS,
         system=NARRATOR_SYSTEM_PROMPT,
@@ -284,7 +320,7 @@ def handle_player_turn(g: Game) -> None:
         output_format=GameTurn,
     )
 
-    g.turn = narration.parsed_output
+    g.turn = narrator.parsed_output
 
     if g.turn is None:
         g.error = "turn not returned"
@@ -329,6 +365,39 @@ def handle_player_turn(g: Game) -> None:
 
     g.messages.append({"role": "assistant", "content": g.turn.model_dump_json()})
     g.messages.append({"role": "user", "content": f"I choose: {choice}"})
+
+    handle_director(g)
+
+    return
+
+
+def handle_director(g: Game) -> None:
+    director = g.client.messages.parse(
+        model=DIRECTOR_MODEL,
+        max_tokens=MAX_TOKENS,
+        system=DIRECTOR_SYSTEM_PROMPT,
+        messages=build_director_message(g),
+        output_format=StoryState,
+    )
+    story_state = director.parsed_output
+
+    if story_state is None:
+        print("\nNO STORY STATE RETURNED")
+        return
+
+    g.story_state_log.append(story_state)
+    print(
+        dedent(f"""\n   
+            --------------------    
+                STORY STATE
+            --------------------\n
+            rationale: {story_state.rationale}\n
+            danger: {story_state.danger}
+            mood: {story_state.mood}
+            tension: {story_state.tension}
+            pace: {story_state.pace}\n
+        """)
+    )
 
     return
 
