@@ -312,6 +312,19 @@ def build_director_message(g: Game) -> list[MessageParam]:
 
 
 def handle_player_turn(g: Game) -> None:
+    handle_narration(g)
+    if g.turn is None:
+        g.error = "turn not returned"
+        g.app_state = AppState.ERROR
+        return
+
+    handle_user_input(g, g.turn, g.turn.narrative, g.turn.choices)
+    handle_player_effects(g, g.player_stats, g.turn.player_effects)
+    handle_director(g)
+    return
+
+
+def handle_narration(g: Game) -> None:
     narrator = g.client.messages.parse(
         model=NARRATOR_MODEL,
         max_tokens=MAX_TOKENS,
@@ -319,15 +332,13 @@ def handle_player_turn(g: Game) -> None:
         messages=build_turn_message(g),
         output_format=GameTurn,
     )
-
     g.turn = narrator.parsed_output
+    return
 
-    if g.turn is None:
-        g.error = "turn not returned"
-        return
 
-    handle_player_effects(g, g.player_stats, g.turn.player_effects)
-
+def handle_user_input(
+    g: Game, turn: GameTurn, narrative: str, choices: list[str]
+) -> None:
     print(
         dedent("""
             --------------------
@@ -335,9 +346,9 @@ def handle_player_turn(g: Game) -> None:
             --------------------\n
         """)
     )
-    print(f"{g.turn.narrative}\n")
+    print(f"{narrative}\n")
 
-    for i, choice in enumerate(g.turn.choices):
+    for i, choice in enumerate(choices):
         print(f"[#{i + 1}] {choice}\n")
 
     print(
@@ -347,7 +358,6 @@ def handle_player_turn(g: Game) -> None:
             ---------------------\n
         """)
     )
-
     raw = input("number or m for menu: ")
     if raw == "m":
         g.app_state = AppState.MENU
@@ -358,17 +368,13 @@ def handle_player_turn(g: Game) -> None:
         return
 
     index = int(raw) - 1
-    if index < 0 or index >= len(g.turn.choices):
+    if index < 0 or index >= len(choices):
         print("that's not one of the choices")
         return
-    choice = g.turn.choices[index]
+    choice = choices[index]
 
-    g.messages.append({"role": "assistant", "content": g.turn.model_dump_json()})
+    g.messages.append({"role": "assistant", "content": turn.model_dump_json()})
     g.messages.append({"role": "user", "content": f"I choose: {choice}"})
-
-    handle_director(g)
-
-    return
 
 
 def handle_director(g: Game) -> None:
