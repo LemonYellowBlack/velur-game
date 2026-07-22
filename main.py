@@ -228,7 +228,7 @@ def handle_player_turn(g: Game) -> None:
         g.error = "turn not returned"
         return
 
-    handle_player_effects(g, g.player_stats, g.player_state, g.turn.player_effects)
+    handle_player_effects(g, g.player_stats, g.turn.player_effects)
 
     print(
         dedent("""
