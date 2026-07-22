@@ -27,3 +27,4 @@
     - when should this happen and what is the trigger?
     - does it check corpus (maybe a third tier of model) and how is that loaded?
     - if director agent modifies state async does that cause a noticible issue for the lagging turn?
+- implement a turn counter to see when story_state is altered

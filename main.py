@@ -9,8 +9,8 @@ from pathlib import Path
 from textwrap import dedent
 from datetime import datetime
 
-MODEL = "claude-haiku-4-5"
-SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
+NARRATOR_MODEL = "claude-haiku-4-5"
+NARRATOR_SYSTEM_PROMPT = "You are the Game Master of a dark fantasy adventure."
 FIRST_TURN = "Begin a new adventure with a castle scene."
 MAX_TOKENS = 1024
 SAVES_DIR = Path(__file__).parent / "saves"
@@ -37,12 +37,65 @@ class Tension(StrEnum):
     DREAD = "dread"
     TERROR = "terror"
 
+    @property
+    def cue(self) -> str:
+        return {
+            Tension.CALM: "at ease; nothing presses on the mind",
+            Tension.UNEASY: "something feels off; a prickle of doubt",
+            Tension.TENSE: "nerves drawn tight; poised for something",
+            Tension.DREAD: "a heavy certainty that something is wrong",
+            Tension.TERROR: "gripping fear; the mind screams to flee",
+        }[self]
+
 
 class Pace(StrEnum):
     LULL = "lull"
     MEASURED = "measured"
     BRISK = "brisk"
     BREAKNECK = "breakneck"
+
+    @property
+    def cue(self) -> str:
+        return {
+            Pace.LULL: "time to linger; nothing hurries the moment",
+            Pace.MEASURED: "events move at a steady, even step",
+            Pace.BRISK: "things move quickly; little time to dwell",
+            Pace.BREAKNECK: "relentless; no moment to breathe",
+        }[self]
+
+
+class Danger(StrEnum):
+    SAFE = "safe"
+    RISKY = "risky"
+    PERILOUS = "perilous"
+    DEADLY = "deadly"
+
+    @property
+    def cue(self) -> str:
+        return {
+            Danger.SAFE: "no real threat to body or life",
+            Danger.RISKY: "harm is possible if careless",
+            Danger.PERILOUS: "serious injury likely without care",
+            Danger.DEADLY: "death is a real and present outcome",
+        }[self]
+
+
+class Mood(StrEnum):
+    WONDROUS = "wondrous"
+    HOPEFUL = "hopeful"
+    MELANCHOLY = "melancholy"
+    EERIE = "eerie"
+    BLEAK = "bleak"
+
+    @property
+    def cue(self) -> str:
+        return {
+            Mood.WONDROUS: "awe and beauty; the world astonishes",
+            Mood.HOPEFUL: "warmth and promise; things may yet turn out",
+            Mood.MELANCHOLY: "quiet sorrow; beauty tinged with loss",
+            Mood.EERIE: "unnatural stillness; something is not right",
+            Mood.BLEAK: "cold and hopeless; comfort is absent",
+        }[self]
 
 
 class Exhaustion(StrEnum):
@@ -63,26 +116,35 @@ class Exhaustion(StrEnum):
         }[self]
 
 
-class Danger(StrEnum):
-    SAFE = "safe"
-    RISKY = "risky"
-    PERILOUS = "perilous"
-    DEADLY = "deadly"
-
-
-class Mood(StrEnum):
-    WONDROUS = "wondrous"
-    HOPEFUL = "hopeful"
-    MELANCHOLY = "melancholy"
-    EERIE = "eerie"
-    BLEAK = "bleak"
-
-
 class StoryState(BaseModel):
-    tension: Tension = Tension.UNEASY
-    pace: Pace = Pace.MEASURED
-    danger: Danger = Danger.RISKY
-    mood: Mood = Mood.MELANCHOLY
+    tension: Tension = Field(
+        default=Tension.UNEASY,
+        description=(
+            "the felt emotional pressure of the scene, "
+            "independent of actual physical threat; "
+            "raise and lower as the narrative's stakes change."
+        ),
+    )
+    pace: Pace = Field(
+        default=Pace.MEASURED,
+        description=(
+            "how fast events are unfolding: "
+            "raise during action or rapid consequenses; "
+            "lower during exploration, dialogue, or reflection - when the player can take their time"
+        ),
+    )
+    danger: Danger = Field(
+        default=Danger.RISKY,
+        description=(
+            "the objective threat to the player - "
+            "can be independent from the player's perception in the event of an unknown danger"
+        ),
+    )
+    mood: Mood = Field(
+        default=Mood.MELANCHOLY,
+        description=("the asthetic tone or atmosphere of the current setting"),
+    )
+    rationale: str = "initial state"
 
 
 class PlayerEffects(BaseModel):
@@ -214,15 +276,15 @@ def build_turn_message(g: Game) -> list[MessageParam]:
 
 
 def handle_player_turn(g: Game) -> None:
-    response = g.client.messages.parse(
-        model=MODEL,
+    narration = g.client.messages.parse(
+        model=NARRATOR_MODEL,
         max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+        system=NARRATOR_SYSTEM_PROMPT,
         messages=build_turn_message(g),
         output_format=GameTurn,
     )
 
-    g.turn = response.parsed_output
+    g.turn = narration.parsed_output
 
     if g.turn is None:
         g.error = "turn not returned"
