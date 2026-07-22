@@ -313,11 +313,6 @@ def build_director_message(g: Game) -> list[MessageParam]:
 
 def handle_player_turn(g: Game) -> None:
     handle_narration(g)
-    if g.turn is None:
-        g.error = "turn not returned"
-        g.app_state = AppState.ERROR
-        return
-
     handle_user_input(g, g.turn, g.turn.narrative, g.turn.choices)
     handle_player_effects(g, g.player_stats, g.turn.player_effects)
     handle_director(g)
@@ -333,6 +328,11 @@ def handle_narration(g: Game) -> None:
         output_format=GameTurn,
     )
     g.turn = narrator.parsed_output
+
+    if g.turn is None:
+        g.error = "turn not returned"
+        g.app_state = AppState.ERROR
+
     return
 
 
