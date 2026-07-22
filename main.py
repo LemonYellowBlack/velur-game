@@ -40,8 +40,8 @@ class Tension(StrEnum):
 
 class Pace(StrEnum):
     LULL = "lull"
-    STEADY = "steady"
-    RISING = "rising"
+    MEASURED = "measured"
+    BRISK = "brisk"
     BREAKNECK = "breakneck"
 
 
@@ -52,6 +52,16 @@ class Exhaustion(StrEnum):
     FLAGGING = "flagging"
     SPENT = "spent"
 
+    @property
+    def cue(self) -> str:
+        return {
+            Exhaustion.FRESH: "unwearied; moves freely",
+            Exhaustion.WINDED: "breathing hard; brief effort tells",
+            Exhaustion.TIRED: "tiring; sustained effort is a strain",
+            Exhaustion.FLAGGING: "near their limit; failing at hard exertion",
+            Exhaustion.SPENT: "utterly spent; can barely stand",
+        }[self]
+
 
 class Danger(StrEnum):
     SAFE = "safe"
@@ -61,21 +71,18 @@ class Danger(StrEnum):
 
 
 class Mood(StrEnum):
-    HOPEFULL = "hopefull"
-    SOMBER = "somber"
-    OMINOUS = "ominous"
+    WONDROUS = "wondrous"
+    HOPEFUL = "hopeful"
+    MELANCHOLY = "melancholy"
+    EERIE = "eerie"
     BLEAK = "bleak"
-
-
-class PlayerState(BaseModel):
-    exhaustion: Exhaustion = Exhaustion.FRESH
 
 
 class StoryState(BaseModel):
     tension: Tension = Tension.UNEASY
-    pace: Pace = Pace.STEADY
+    pace: Pace = Pace.MEASURED
     danger: Danger = Danger.RISKY
-    mood: Mood = Mood.OMINOUS
+    mood: Mood = Mood.MELANCHOLY
 
 
 class PlayerEffects(BaseModel):
@@ -112,7 +119,6 @@ class Game:
     client: anthropic.Anthropic
     app_state: AppState = AppState.MENU
     player_stats: PlayerStats = field(default_factory=PlayerStats)
-    player_state: PlayerState = field(default_factory=PlayerState)
     story_state_log: list[StoryState] = field(default_factory=lambda: [StoryState()])
     messages: list[MessageParam] = field(default_factory=list)
     turn: GameTurn | None = None
@@ -184,7 +190,7 @@ def get_turn_header(g: Game) -> str:
                     pace: {g.story_state_log[-1].pace}
                     danger: {g.story_state_log[-1].danger}
                     mood: {g.story_state_log[-1].mood}
-                    player's exhaustion: {g.player_state.exhaustion}
+                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
                     ------------------------------------
                   """)
 
@@ -265,9 +271,7 @@ def handle_player_turn(g: Game) -> None:
     return
 
 
-def handle_player_effects(
-    g: Game, stats: PlayerStats, state: PlayerState, effects: PlayerEffects
-) -> None:
+def handle_player_effects(g: Game, stats: PlayerStats, effects: PlayerEffects) -> None:
     match effects.health:
         case Effect.SEVERE:
             stats.health -= 20
@@ -291,17 +295,21 @@ def handle_player_effects(
         case _:
             pass
 
-    if stats.stamina <= 0:
+    if stats.stamina < 0:
         stats.stamina = 0
-        state.exhaustion = Exhaustion.SPENT
-    elif stats.stamina <= 25:
-        state.exhaustion = Exhaustion.FLAGGING
-    elif stats.stamina <= 50:
-        state.exhaustion = Exhaustion.TIRED
-    elif stats.stamina <= 75:
-        state.exhaustion = Exhaustion.WINDED
+
+
+def get_exhaustion(stamina: int) -> Exhaustion:
+    if stamina <= 0:
+        return Exhaustion.SPENT
+    elif stamina <= 25:
+        return Exhaustion.FLAGGING
+    elif stamina <= 50:
+        return Exhaustion.TIRED
+    elif stamina <= 75:
+        return Exhaustion.WINDED
     else:
-        state.exhaustion = Exhaustion.FRESH
+        return Exhaustion.FRESH
 
 
 def handle_player_death(g: Game) -> None:
@@ -357,7 +365,6 @@ def save_game(g: Game) -> None:
     d = {
         "messages": g.messages,
         "story_state_log": [s.model_dump(mode="json") for s in g.story_state_log],
-        "player_state": g.player_state.model_dump(mode="json"),
         "player_stats": asdict(g.player_stats),
     }
     with g.save_file.open("w") as f:
@@ -403,7 +410,6 @@ def load_game(g: Game) -> None:
         d = json.load(f)
         g.messages = d["messages"]
         g.story_state_log = [StoryState.model_validate(x) for x in d["story_state_log"]]
-        g.player_state = PlayerState.model_validate(d["player_state"])
         g.player_stats = TypeAdapter(PlayerStats).validate_python(d["player_stats"])
 
     g.save_file = game_file

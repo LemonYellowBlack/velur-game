@@ -27,6 +27,3 @@
     - when should this happen and what is the trigger?
     - does it check corpus (maybe a third tier of model) and how is that loaded?
     - if director agent modifies state async does that cause a noticible issue for the lagging turn?
-- consider where/when stamina and exhaustion should be calculated: 
-    - will the current placement cause drift or bugs if/when other factors affect either/both?
-    - should exhaustion just be derived (`check_exhaustion()`) when needed?
