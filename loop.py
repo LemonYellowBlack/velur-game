@@ -6,10 +6,10 @@ from domain import (
     Turn,
     NarrationError,
     DirectionError,
-    handle_turn_effects,
 )
 from agents import get_turn_from_narrator, direct_story
 from persistence import save_game, load_game
+from rules import handle_turn_effects
 
 
 def menu(g: Game) -> AppState:

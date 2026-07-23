@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import anthropic
 from domain import Game, AppState
-from engine import menu, play
+from loop import menu, play
 
 
 def main() -> None:

@@ -13,8 +13,8 @@ from domain import (
     StoryState,
     NarrationError,
     DirectionError,
-    get_exhaustion,
 )
+from rules import get_exhaustion
 
 
 def get_turn_header(g: Game) -> str:
