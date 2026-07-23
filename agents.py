@@ -106,10 +106,7 @@ def direct_story(g: Game) -> None:
             danger: {story_state.danger}
             mood: {story_state.mood}
             tension: {story_state.tension}
-            pace: {story_state.pace}\n
-            -----------------------
-               PLAYER STATE
-            -----------------------\n
+            pace: {story_state.pace}
             player health: {g.player_stats.health}
             player stamina: {g.player_stats.stamina}\n
         """)
