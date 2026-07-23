@@ -14,3 +14,8 @@ dependencies = [
 dev = [
     "ruff>=0.15.22",
 ]
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
