@@ -1,4 +1,4 @@
-from domain import Game, Turn, Effect, Exhaustion
+from domain import Game, Turn, Effect, Exhaustion, Vitality
 
 
 def handle_turn_effects(g: Game, t: Turn) -> None:
@@ -40,3 +40,16 @@ def get_exhaustion(stamina: int) -> Exhaustion:
         return Exhaustion.WINDED
     else:
         return Exhaustion.FRESH
+
+
+def get_vitality(health: int) -> Vitality:
+    if health <= 30:
+        return Vitality.CRITICAL
+    elif health <= 50:
+        return Vitality.WOUNDED
+    elif health <= 70:
+        return Vitality.HURT
+    elif health <= 90:
+        return Vitality.GRAZED
+    else:
+        return Vitality.WHOLE

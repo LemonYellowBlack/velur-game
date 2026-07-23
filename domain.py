@@ -105,6 +105,24 @@ class Exhaustion(StrEnum):
         }[self]
 
 
+class Vitality(StrEnum):
+    WHOLE = "whole"
+    GRAZED = "grazed"
+    HURT = "hurt"
+    WOUNDED = "wounded"
+    CRITICAL = "critical"
+
+    @property
+    def cue(self) -> str:
+        return {
+            Vitality.WHOLE: "unhurt; no pain, no restriction",
+            Vitality.GRAZED: "minor cuts and bruises; more nuisance than hindrance",
+            Vitality.HURT: "wounds ache; movement brings pain",
+            Vitality.WOUNDED: "serious injury; the body struggles to keep up",
+            Vitality.CRITICAL: "grievously hurt; death is close without aid",
+        }[self]
+
+
 class StoryState(BaseModel):
     tension: Tension = Field(
         default=Tension.UNEASY,

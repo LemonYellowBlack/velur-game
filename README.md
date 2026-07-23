@@ -23,8 +23,10 @@
     - Story State (plot points, tension, pacing, arcs)
 
 ## TODO
-- model calls to manage story_state:
-    - when should this happen and what is the trigger?
-    - does it check corpus (maybe a third tier of model) and how is that loaded?
-    - if director agent modifies state async does that cause a noticible issue for the lagging turn?
 - implement a turn counter to see when story_state is altered
+    - syncronous calls are already ordered - only really needed for async agent longs
+- log health and stamina changes
+    - should show the turn it happened in save file
+    - pass current values through to director for more context
+    - show with director print statement
+- import parts of corpus and have agents manage the setting 

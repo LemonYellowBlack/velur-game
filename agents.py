@@ -14,7 +14,7 @@ from domain import (
     NarrationError,
     DirectionError,
 )
-from rules import get_exhaustion
+from rules import get_exhaustion, get_vitality
 
 
 def get_turn_header(g: Game) -> str:
@@ -24,6 +24,7 @@ def get_turn_header(g: Game) -> str:
                     pace: {g.story_state_log[-1].pace.cue}
                     danger: {g.story_state_log[-1].danger.cue}
                     mood: {g.story_state_log[-1].mood.cue}
+                    player_vitality: {get_vitality(g.player_stats.health).cue}
                     player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
                     ------------------------------------
                   """)
@@ -36,6 +37,8 @@ def get_director_header(g: Game) -> str:
                     pace: {g.story_state_log[-1].pace}
                     danger: {g.story_state_log[-1].danger}
                     mood: {g.story_state_log[-1].mood}
+                    player_vitality: {get_vitality(g.player_stats.health).cue}
+                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
                     ------------------------------------
                   """)
 
@@ -104,6 +107,11 @@ def direct_story(g: Game) -> None:
             mood: {story_state.mood}
             tension: {story_state.tension}
             pace: {story_state.pace}\n
+            -----------------------
+               PLAYER STATE
+            -----------------------\n
+            player health: {g.player_stats.health}
+            player stamina: {g.player_stats.stamina}\n
         """)
     )
 
