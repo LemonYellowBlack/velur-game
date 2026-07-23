@@ -3,7 +3,7 @@ from pydantic import BaseModel, TypeAdapter, Field
 from dataclasses import dataclass, asdict, field
 import anthropic
 from anthropic.types import MessageParam
-from enum import Enum, StrEnum
+from enum import StrEnum
 import json
 from pathlib import Path
 from textwrap import dedent
@@ -23,10 +23,9 @@ MAX_TOKENS = 1024
 SAVES_DIR = Path(__file__).parent / "saves"
 
 
-class AppState(Enum):
+class AppState(StrEnum):
     PLAYING = "playing"
     QUIT = "quit"
-    ERROR = "error"
     MENU = "menu"
 
 
@@ -171,7 +170,7 @@ class PlayerEffects(BaseModel):
     )
 
 
-class GameTurn(BaseModel):
+class Turn(BaseModel):
     narrative: str
     choices: list[str]
     player_effects: PlayerEffects
@@ -186,35 +185,41 @@ class PlayerStats:
 @dataclass
 class Game:
     client: anthropic.Anthropic
-    app_state: AppState = AppState.MENU
     player_stats: PlayerStats = field(default_factory=PlayerStats)
     story_state_log: list[StoryState] = field(default_factory=lambda: [StoryState()])
     messages: list[MessageParam] = field(default_factory=list)
-    turn: GameTurn | None = None
-    error: str | None = None
     save_file: Path | None = None
 
 
-def main() -> None:
+class GameError(Exception):
+    """any failure the game deliberately anticipates"""
 
+
+class NarrationError(GameError):
+    """the player's turn cannot be produced"""
+
+
+class DirectionError(GameError):
+    """story-state has not been changed"""
+
+
+def main() -> None:
     _ = load_dotenv()
     g = Game(client=anthropic.Anthropic())
 
-    while g.app_state is not AppState.ERROR and g.app_state is not AppState.QUIT:
-        match g.app_state:
-            case AppState.PLAYING:
-                handle_player_turn(g)
+    state = AppState.MENU
+    while state is not AppState.QUIT:
+        match state:
             case AppState.MENU:
-                handle_menu(g)
+                state = menu(g)
+            case AppState.PLAYING:
+                state = play(g)
 
-    if g.app_state is AppState.ERROR:
-        handle_game_error(g)
-
-    if g.app_state is AppState.QUIT:
-        handle_quit()
+    assert state is AppState.QUIT
+    print("goodbye.")
 
 
-def handle_menu(g: Game) -> None:
+def menu(g: Game) -> AppState:
     file_name = ""
     if g.save_file is not None:
         file_name = g.save_file.name
@@ -241,15 +246,40 @@ def handle_menu(g: Game) -> None:
         case 1:
             if len(g.messages) == 0:
                 g.messages.append({"role": "user", "content": FIRST_TURN})
-            g.app_state = AppState.PLAYING
+            return AppState.PLAYING
         case 2:
             save_game(g)
         case 3:
             load_game(g)
         case 4:
-            g.app_state = AppState.QUIT
+            return AppState.QUIT
         case _:
             pass
+
+    return AppState.MENU
+
+
+def play(g: Game) -> AppState:
+    try:
+        t = get_turn_from_narrator(g)
+    except NarrationError as e:
+        print(f"NARRATION FAILURE: {e}")
+        return AppState.MENU
+
+    if handle_user_choice(g, t) is AppState.MENU:
+        return AppState.MENU
+
+    handle_turn_effects(g, t)
+    if g.player_stats.health <= 0:
+        print("YOU DIED")
+        return AppState.QUIT
+
+    try:
+        direct_story(g)
+    except DirectionError as e:
+        print(f"DIRECTOR ERROR: {e}")
+
+    return AppState.PLAYING
 
 
 def get_turn_header(g: Game) -> str:
@@ -311,44 +341,37 @@ def build_director_message(g: Game) -> list[MessageParam]:
     return messages
 
 
-def handle_player_turn(g: Game) -> None:
-    handle_narration(g)
-    handle_user_input(g, g.turn, g.turn.narrative, g.turn.choices)
-    handle_player_effects(g, g.player_stats, g.turn.player_effects)
-    handle_director(g)
-    return
+def get_turn_from_narrator(g: Game) -> Turn:
+    try:
+        narrator = g.client.messages.parse(
+            model=NARRATOR_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=NARRATOR_SYSTEM_PROMPT,
+            messages=build_turn_message(g),
+            output_format=Turn,
+        )
+    except Exception as e:
+        raise NarrationError(f"call to narrator failed: {e}") from e
+
+    if narrator.parsed_output is None:
+        raise NarrationError("narrator returned None")
+
+    return narrator.parsed_output
 
 
-def handle_narration(g: Game) -> None:
-    narrator = g.client.messages.parse(
-        model=NARRATOR_MODEL,
-        max_tokens=MAX_TOKENS,
-        system=NARRATOR_SYSTEM_PROMPT,
-        messages=build_turn_message(g),
-        output_format=GameTurn,
-    )
-    g.turn = narrator.parsed_output
-
-    if g.turn is None:
-        g.error = "turn not returned"
-        g.app_state = AppState.ERROR
-
-    return
-
-
-def handle_user_input(
-    g: Game, turn: GameTurn, narrative: str, choices: list[str]
-) -> None:
+def handle_user_choice(g: Game, t: Turn) -> AppState:
     print(
-        dedent("""
+        dedent(f"""
             --------------------
                 GM TURN
-            --------------------\n
+            --------------------
+
+            {t.narrative}\n
         """)
     )
-    print(f"{narrative}\n")
 
-    for i, choice in enumerate(choices):
+    options = t.choices + [AppState.MENU]
+    for i, choice in enumerate(options):
         print(f"[#{i + 1}] {choice}\n")
 
     print(
@@ -358,38 +381,47 @@ def handle_user_input(
             ---------------------\n
         """)
     )
-    raw = input("number or m for menu: ")
-    if raw == "m":
-        g.app_state = AppState.MENU
-        return
 
-    if not raw.isdigit():
-        print("please enter a number")
-        return
+    choice: str | None = None
+    while choice is None:
+        raw = input("select an option: ")
 
-    index = int(raw) - 1
-    if index < 0 or index >= len(choices):
-        print("that's not one of the choices")
-        return
-    choice = choices[index]
+        if not raw.isdigit():
+            print("please enter a number")
+            continue
 
-    g.messages.append({"role": "assistant", "content": turn.model_dump_json()})
+        index = int(raw) - 1
+        if index < 0 or index >= len(options):
+            print("that's not one of the choices")
+            continue
+
+        choice = options[index]
+
+    if choice == AppState.MENU:
+        return AppState.MENU
+
+    g.messages.append({"role": "assistant", "content": t.model_dump_json()})
     g.messages.append({"role": "user", "content": f"I choose: {choice}"})
 
+    return AppState.PLAYING
 
-def handle_director(g: Game) -> None:
-    director = g.client.messages.parse(
-        model=DIRECTOR_MODEL,
-        max_tokens=MAX_TOKENS,
-        system=DIRECTOR_SYSTEM_PROMPT,
-        messages=build_director_message(g),
-        output_format=StoryState,
-    )
+
+def direct_story(g: Game) -> None:
+    try:
+        director = g.client.messages.parse(
+            model=DIRECTOR_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=DIRECTOR_SYSTEM_PROMPT,
+            messages=build_director_message(g),
+            output_format=StoryState,
+        )
+    except Exception as e:
+        raise DirectionError(f"call to director failed: {e}") from e
+
     story_state = director.parsed_output
 
     if story_state is None:
-        print("\nNO STORY STATE RETURNED")
-        return
+        raise DirectionError("no direction returned")
 
     g.story_state_log.append(story_state)
     print(
@@ -408,32 +440,32 @@ def handle_director(g: Game) -> None:
     return
 
 
-def handle_player_effects(g: Game, stats: PlayerStats, effects: PlayerEffects) -> None:
-    match effects.health:
+def handle_turn_effects(g: Game, t: Turn) -> None:
+    match t.player_effects.health:
         case Effect.SEVERE:
-            stats.health -= 20
+            g.player_stats.health -= 20
         case Effect.MODERATE:
-            stats.health -= 10
+            g.player_stats.health -= 10
         case Effect.MINOR:
-            stats.health -= 5
+            g.player_stats.health -= 5
         case _:
             pass
 
-    if stats.health <= 0:
-        handle_player_death(g)
+    if g.player_stats.health <= 0:
+        return
 
-    match effects.stamina:
+    match t.player_effects.stamina:
         case Effect.SEVERE:
-            stats.stamina -= 20
+            g.player_stats.stamina -= 20
         case Effect.MODERATE:
-            stats.stamina -= 10
+            g.player_stats.stamina -= 10
         case Effect.MINOR:
-            stats.stamina -= 5
+            g.player_stats.stamina -= 5
         case _:
             pass
 
-    if stats.stamina < 0:
-        stats.stamina = 0
+    if g.player_stats.stamina < 0:
+        g.player_stats.stamina = 0
 
 
 def get_exhaustion(stamina: int) -> Exhaustion:
@@ -447,20 +479,6 @@ def get_exhaustion(stamina: int) -> Exhaustion:
         return Exhaustion.WINDED
     else:
         return Exhaustion.FRESH
-
-
-def handle_player_death(g: Game) -> None:
-    print("YOU DIED")
-    g.app_state = AppState.QUIT
-
-
-def handle_game_error(g: Game) -> None:
-    raise RuntimeError(g.error)
-
-
-def handle_quit() -> None:
-    print("goodbye.")
-    return
 
 
 def save_game(g: Game) -> None:
