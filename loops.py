@@ -6,8 +6,9 @@ from domain import (
     Turn,
     NarrationError,
     DirectionError,
+    LoreError,
 )
-from agents import get_turn_from_narrator, direct_story
+from agents import get_turn_from_narrator, direct_story, update_world_state
 from persistence import save_game, load_game
 from rules import handle_turn_effects
 
@@ -52,7 +53,12 @@ def menu(g: Game) -> AppState:
     return AppState.MENU
 
 
-def play(g: Game) -> AppState:
+def play_turn(g: Game) -> AppState:
+    try:
+        update_world_state(g)
+    except LoreError as e:
+        print(f"LORE MASTER ERROR: {e}")
+
     try:
         t = get_turn_from_narrator(g)
     except NarrationError as e:

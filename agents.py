@@ -3,18 +3,33 @@ from anthropic.types import MessageParam
 from config import (
     NARRATOR_MODEL,
     NARRATOR_SYSTEM_PROMPT,
+    NARRATOR_MAX_TOKENS,
     DIRECTOR_MODEL,
     DIRECTOR_SYSTEM_PROMPT,
-    MAX_TOKENS,
+    DIRECTOR_MAX_TOKENS,
+    LOREMASTER_MODEL,
+    LOREMASTER_SYSTEM_PROMPT,
+    LOREMASTER_MAX_TOKENS,
 )
 from domain import (
     Game,
     Turn,
     StoryState,
+    WorldState,
     NarrationError,
     DirectionError,
+    LoreError,
 )
 from rules import get_exhaustion, get_vitality
+from lore import load_lore
+
+LORE = load_lore(
+    [
+        "War of the Orders: A Sea of Fire, Prologue.md",
+        "War of the Orders: Character Overviews.md",
+        "War of the Orders Series: Overview.md",
+    ]
+)
 
 
 def get_turn_from_narrator(g: Game) -> Turn:
@@ -62,6 +77,10 @@ def _get_narrator_header(g: Game) -> str:
                     mood: {g.story_state_log[-1].mood.cue}
                     player vitality: {get_vitality(g.player_stats.health).cue}
                     player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
+                    ------------------------------------
+
+                    SCENE CONTEXT:
+                    {g.world_state_log[-1].scene_context}
                     ------------------------------------
                   """)
 
@@ -123,46 +142,47 @@ def _build_director_message(g: Game) -> list[MessageParam]:
 def _get_director_header(g: Game) -> str:
     return dedent(f"""
                     PREVIOUS DIRECTION:
+
                     tension: {g.story_state_log[-1].tension}
                     pace: {g.story_state_log[-1].pace}
                     danger: {g.story_state_log[-1].danger}
                     mood: {g.story_state_log[-1].mood}
+
                     player_vitality: {get_vitality(g.player_stats.health).cue}
                     player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
+                    ------------------------------------
+
+                    PLOT HOOKS:
+                    {g.world_state_log[-1].plot_hooks}
                     ------------------------------------
                   """)
 
 
-def run_loremaster(g: Game) -> None:
+def update_world_state(g: Game) -> None:
     try:
         director = g.client.messages.parse(
             model=LOREMASTER_MODEL,
             max_tokens=LOREMASTER_MAX_TOKENS,
             system=LOREMASTER_SYSTEM_PROMPT,
             messages=_build_loremaster_message(g),
-            output_format=StoryState,
+            output_format=WorldState,
         )
     except Exception as e:
-        raise DirectionError(f"call to director failed: {e}") from e
+        raise LoreError(f"call to loremaster failed: {e}") from e
 
-    story_state = director.parsed_output
+    world_state = director.parsed_output
 
-    if story_state is None:
-        raise DirectionError("no direction returned")
+    if world_state is None:
+        raise LoreError("no lore returned")
 
-    g.story_state_log.append(story_state)
+    g.world_state_log.append(world_state)
     print(
         dedent(f"""\n   
             --------------------    
-                STORY STATE
+                WORLD STATE
             --------------------\n
-            rationale: {story_state.rationale}\n
-            danger: {story_state.danger}
-            mood: {story_state.mood}
-            tension: {story_state.tension}
-            pace: {story_state.pace}
-            player health: {g.player_stats.health}
-            player stamina: {g.player_stats.stamina}\n
+            scene context: {world_state.scene_context}\n
+            plot hooks: {world_state.plot_hooks}\n
         """)
     )
 
@@ -179,7 +199,11 @@ def _build_loremaster_message(g: Game) -> list[MessageParam]:
         messages[-1] = {
             "role": "user",
             "content": [
-                {"type": "text", "text": _get_loremaster_header(g)},
+                {
+                    "type": "text",
+                    "text": _get_loremaster_header(g),
+                    "cache_control": {"type": "ephemeral"},
+                },
                 {"type": "text", "text": content},
             ],
         }
@@ -189,12 +213,11 @@ def _build_loremaster_message(g: Game) -> list[MessageParam]:
 
 def _get_loremaster_header(g: Game) -> str:
     return dedent(f"""
-                    PREVIOUS DIRECTION:
-                    tension: {g.story_state_log[-1].tension}
-                    pace: {g.story_state_log[-1].pace}
-                    danger: {g.story_state_log[-1].danger}
-                    mood: {g.story_state_log[-1].mood}
-                    player_vitality: {get_vitality(g.player_stats.health).cue}
-                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
+                    ## WORLD LORE
+                    ------------------------------------
+                    {LORE}
+                    ------------------------------------
+                    
+                    ### GAME CONTENT
                     ------------------------------------
                   """)

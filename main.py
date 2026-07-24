@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import anthropic
 from domain import Game, AppState
-from loops import menu, play
+from loops import menu, play_turn
 
 
 def main() -> None:
@@ -14,7 +14,7 @@ def main() -> None:
             case AppState.MENU:
                 state = menu(g)
             case AppState.PLAYING:
-                state = play(g)
+                state = play_turn(g)
 
     assert state is AppState.QUIT
     print("goodbye.")

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 import anthropic
 from anthropic.types import MessageParam
 from pathlib import Path
+from config import INITIAL_PLOT_HOOKS, INITIAL_SCENE_CONTEXT
 
 
 class AppState(StrEnum):
@@ -154,6 +155,25 @@ class StoryState(BaseModel):
     rationale: str = "initial state"
 
 
+class WorldState(BaseModel):
+    scene_context: str = Field(
+        default=INITIAL_SCENE_CONTEXT,
+        description=(
+            "grounding facts for the Narrator: who is present, where they are, "
+            "and what the environment looks and sounds like right now. "
+            "Reference notes, not prose to be copied verbatim."
+        ),
+    )
+    plot_hooks: list[str] = Field(
+        default=INITIAL_PLOT_HOOKS,
+        description=(
+            "events from the source material that are dramatically available "
+            "from this point forward, for the Director to weigh and pace toward. "
+            "Possibilities, not certainties — do not phrase these as things that will happen."
+        ),
+    )
+
+
 class PlayerEffects(BaseModel):
     health: Effect = Field(
         default=Effect.NONE,
@@ -188,6 +208,7 @@ class Game:
     client: anthropic.Anthropic
     player_stats: PlayerStats = field(default_factory=PlayerStats)
     story_state_log: list[StoryState] = field(default_factory=lambda: [StoryState()])
+    world_state_log: list[WorldState] = field(default_factory=lambda: [WorldState()])
     messages: list[MessageParam] = field(default_factory=list)
     save_file: Path | None = None
 
@@ -202,3 +223,7 @@ class NarrationError(GameError):
 
 class DirectionError(GameError):
     """story-state has not been changed"""
+
+
+class LoreError(GameError):
+    """lore could not be maintained"""
