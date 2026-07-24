@@ -17,7 +17,43 @@ from domain import (
 from rules import get_exhaustion, get_vitality
 
 
-def get_turn_header(g: Game) -> str:
+def get_turn_from_narrator(g: Game) -> Turn:
+    try:
+        narrator = g.client.messages.parse(
+            model=NARRATOR_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=NARRATOR_SYSTEM_PROMPT,
+            messages=_build_narrator_message(g),
+            output_format=Turn,
+        )
+    except Exception as e:
+        raise NarrationError(f"call to narrator failed: {e}") from e
+
+    if narrator.parsed_output is None:
+        raise NarrationError("narrator returned None")
+
+    return narrator.parsed_output
+
+
+def _build_narrator_message(g: Game) -> list[MessageParam]:
+    messages = list(g.messages)
+    if messages and messages[-1]["role"] == "user":
+        content = messages[-1]["content"]
+        if not isinstance(content, str):
+            return messages
+
+        messages[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": _get_narrator_header(g)},
+                {"type": "text", "text": content},
+            ],
+        }
+
+    return messages
+
+
+def _get_narrator_header(g: Game) -> str:
     return dedent(f"""
                     NARRATIVE DIRECTION:
                     tension: {g.story_state_log[-1].tension.cue}
@@ -30,62 +66,13 @@ def get_turn_header(g: Game) -> str:
                   """)
 
 
-def get_director_header(g: Game) -> str:
-    return dedent(f"""
-                    PREVIOUS DIRECTION:
-                    tension: {g.story_state_log[-1].tension}
-                    pace: {g.story_state_log[-1].pace}
-                    danger: {g.story_state_log[-1].danger}
-                    mood: {g.story_state_log[-1].mood}
-                    player_vitality: {get_vitality(g.player_stats.health).cue}
-                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
-                    ------------------------------------
-                  """)
-
-
-def build_turn_message(g: Game) -> list[MessageParam]:
-    messages = list(g.messages)
-    if messages and messages[-1]["role"] == "user":
-        content = messages[-1]["content"]
-        if not isinstance(content, str):
-            return messages
-
-        messages[-1] = {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": get_turn_header(g)},
-                {"type": "text", "text": content},
-            ],
-        }
-
-    return messages
-
-
-def build_director_message(g: Game) -> list[MessageParam]:
-    messages = list(g.messages)
-    if messages and messages[-1]["role"] == "user":
-        content = messages[-1]["content"]
-        if not isinstance(content, str):
-            return messages
-
-        messages[-1] = {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": get_director_header(g)},
-                {"type": "text", "text": content},
-            ],
-        }
-
-    return messages
-
-
 def direct_story(g: Game) -> None:
     try:
         director = g.client.messages.parse(
             model=DIRECTOR_MODEL,
             max_tokens=MAX_TOKENS,
             system=DIRECTOR_SYSTEM_PROMPT,
-            messages=build_director_message(g),
+            messages=_build_director_message(g),
             output_format=StoryState,
         )
     except Exception as e:
@@ -115,19 +102,32 @@ def direct_story(g: Game) -> None:
     return
 
 
-def get_turn_from_narrator(g: Game) -> Turn:
-    try:
-        narrator = g.client.messages.parse(
-            model=NARRATOR_MODEL,
-            max_tokens=MAX_TOKENS,
-            system=NARRATOR_SYSTEM_PROMPT,
-            messages=build_turn_message(g),
-            output_format=Turn,
-        )
-    except Exception as e:
-        raise NarrationError(f"call to narrator failed: {e}") from e
+def _build_director_message(g: Game) -> list[MessageParam]:
+    messages = list(g.messages)
+    if messages and messages[-1]["role"] == "user":
+        content = messages[-1]["content"]
+        if not isinstance(content, str):
+            return messages
 
-    if narrator.parsed_output is None:
-        raise NarrationError("narrator returned None")
+        messages[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": get_director_header(g)},
+                {"type": "text", "text": content},
+            ],
+        }
 
-    return narrator.parsed_output
+    return messages
+
+
+def get_director_header(g: Game) -> str:
+    return dedent(f"""
+                    PREVIOUS DIRECTION:
+                    tension: {g.story_state_log[-1].tension}
+                    pace: {g.story_state_log[-1].pace}
+                    danger: {g.story_state_log[-1].danger}
+                    mood: {g.story_state_log[-1].mood}
+                    player_vitality: {get_vitality(g.player_stats.health).cue}
+                    player exhaustion: {get_exhaustion(g.player_stats.stamina).cue}
+                    ------------------------------------
+                  """)

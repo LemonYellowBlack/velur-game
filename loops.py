@@ -59,7 +59,7 @@ def play(g: Game) -> AppState:
         print(f"NARRATION FAILURE: {e}")
         return AppState.MENU
 
-    if handle_user_choice(g, t) is AppState.MENU:
+    if _handle_user_choice(g, t) is AppState.MENU:
         return AppState.MENU
 
     handle_turn_effects(g, t)
@@ -75,7 +75,7 @@ def play(g: Game) -> AppState:
     return AppState.PLAYING
 
 
-def handle_user_choice(g: Game, t: Turn) -> AppState:
+def _handle_user_choice(g: Game, t: Turn) -> AppState:
     print(
         dedent(f"""
             --------------------
